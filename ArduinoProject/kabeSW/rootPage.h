@@ -1,6 +1,8 @@
 #ifndef __ROOTPAGE__
 #define __ROOTPAGE__
 
+#define VERSION_STR "zgtk-guri/Kabecon Ver.2.1.1"
+
 #define ROOT_HTML F("\
 <HTML><HTAD><meta http-equiv='Content-Type' content='text/html; charset=utf-8'>\
 </HEAD><BODY>\
@@ -38,7 +40,7 @@ body{font-size: 10em;}\
 <A HREF='/procini'>iniデバッグ用</A><BR>\
 <A HREF='/delini'>設定を初期化</A><BR>\
 <A HREF='/update'>ファームウェア更新</A><BR>\
-Ver.2.01\
+"VERSION_STR"\
 </BODY></HTML>")
 
 

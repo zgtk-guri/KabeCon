@@ -1,36 +1,33 @@
 #include "AdvancedOTA.h"
 #include "CiniParser.h"
 #include "rootPage.h"
+#include <Servo.h>
+#include "switch.h"
 
 #define INIFNM "/config.ini"
 
-#include <Servo.h>
-Servo myservo;
-
-ESP8266WiFiMulti WiFiMulti;
-ESP8266WebServer server(80);
-
-#define servoPow 13
+#define servo1Pow 13
+#define servo2Pow 12
 //#define servoSig 1  //TX
 #define servoSig 14  //REMOTE
 #define leftSW 4
 #define rightSW 5
 #define bootSW 0
 
-int pos = 100;
-int minimum = 256;
-int maximum = 0;
+Servo myservo;
+Switch topSwitch(myservo, servo2Pow, 255, 0, 100);
+Switch bottomSwitch(myservo, servo1Pow, 0, 255, 100);
 
-bool isOn = false;
+ESP8266WiFiMulti WiFiMulti;
+ESP8266WebServer server(80);
+
 
 void setup() {
 //  Serial.begin(74880);
   Serial.end();
-  
-  digitalWrite(servoPow, LOW);
-  pinMode(servoPow, OUTPUT);
-  pinMode(leftSW, INPUT);
-  pinMode(rightSW, INPUT);
+
+  pinMode(leftSW, INPUT_PULLUP);
+  pinMode(rightSW, INPUT_PULLUP);
   pinMode(bootSW, INPUT);
   myservo.attach(servoSig);
 
@@ -60,11 +57,11 @@ void loop() {
   listener();
 
   if (digitalRead(leftSW) == LOW) {
-    swOff();
+    topSwitch.turn();
   }
 
   if (digitalRead(rightSW) == LOW) {
-    swOn();
+    bottomSwitch.turn();
   }
 
   if (digitalRead(bootSW) == LOW) {
@@ -89,19 +86,22 @@ void handleRoot() {
 }
 
 void handleOn() {
-  swOn();
+  topSwitch.on();
+  bottomSwitch.on();
   server.sendHeader("Location", "/", true);
   server.send(302, "text/plain", "");
 }
 
 void handleOff() {
-  swOff();
+  topSwitch.off();
+  bottomSwitch.off();
   server.sendHeader("Location", "/", true);
   server.send(302, "text/plain", "");
 }
 
 void handleTurn(){
-  swTurn();
+  topSwitch.turn();
+  bottomSwitch.turn();
   server.sendHeader("Location", "/", true);
   server.send(302, "text/plain", "");
 }
@@ -114,6 +114,7 @@ int initialize(){
   ////// ini Update
   CiniParser ini;
   String strMinimum, strMaximum;
+  int minimum, maximum;
   int res1=0,res2=0;
   
   if(ini.setIniFileName( INIFNM )){
@@ -123,12 +124,24 @@ int initialize(){
   res1 = ini.rwIni("KabeCon", "minimum1", &strMinimum, READ);
   res2 = ini.rwIni("KabeCon", "maximum1", &strMaximum, READ);
   
-  if(res1 == 3 && res2 == 3){
-    minimum = strMinimum.toInt();
-    maximum = strMaximum.toInt();
-    return 0;
+  if(res1 != 3 || res2 != 3){
+    return 1;
   }
-  return 1;
+  minimum = strMinimum.toInt();
+  maximum = strMaximum.toInt();
+  bottomSwitch.setPositions(minimum, maximum, (maximum + minimum) / 2);
+
+  res1 = ini.rwIni("KabeCon", "minimum0", &strMinimum, READ);
+  res2 = ini.rwIni("KabeCon", "maximum0", &strMaximum, READ);
+
+  if(res1 != 3 || res2 != 3){
+    return 1;
+  }
+  minimum = strMinimum.toInt();
+  maximum = strMaximum.toInt();
+  topSwitch.setPositions(maximum, minimum, (maximum + minimum) / 2);
+  
+  return 0;
 }
 
 void setServoParam(bool wifiSetup) {
@@ -138,16 +151,15 @@ void setServoParam(bool wifiSetup) {
 
   const int sensitive = 100;
 
-  minimum = 256;
-  maximum = 0;
-  pos = 100;
-//  int minimum = 256;
-//  int maximum = 0;
+  int minimum = 256;
+  int maximum = 0;
+  int pos = 100;
   myservo.write(pos);
 
+  // topSwitch
   while(1){
     if(wifiSetup)listener();
-    digitalWrite(servoPow, HIGH);
+    digitalWrite(servo2Pow, HIGH);
 
     currentMills = millis();
     if(currentMills - previousMills >= interval){
@@ -156,7 +168,61 @@ void setServoParam(bool wifiSetup) {
       pinMode(leftSW, OUTPUT);
       delay(100);
       digitalWrite(leftSW,HIGH);
-      pinMode(leftSW, INPUT);
+      pinMode(leftSW, INPUT_PULLUP);
+    }
+
+    if (digitalRead(rightSW) == LOW) {
+      if(0 < pos) pos -= 1;
+      if(pos < minimum) minimum = pos;
+      delay(sensitive);
+    }
+
+    if (digitalRead(leftSW) == LOW) {
+      if(pos < 256) pos += 1;
+    if(maximum < pos) maximum = pos;
+      delay(sensitive);
+    }
+
+    myservo.write(pos);
+
+    if (digitalRead(bootSW) == LOW) {
+      digitalWrite(servo2Pow, LOW);
+      break;
+    }
+  }
+
+  ////// ini Update
+  if(maximum){
+    CiniParser ini;
+    String strMinimum;
+    String strMaximum;
+    strMinimum = minimum;
+    strMaximum = maximum;
+    if(ini.setIniFileName( INIFNM )){
+      //Serial.println("File not exist");
+    }
+    ini.rwIni("KabeCon", "minimum0", &strMinimum, WRITE);
+    ini.rwIni("KabeCon", "maximum0", &strMaximum, WRITE);
+    topSwitch.setPositions(maximum, minimum, (minimum + maximum) / 2);
+  }
+
+  minimum = 256;
+  maximum = 0;
+  pos = 100;
+  myservo.write(pos);
+  // bottomSwitch
+  while(1){
+    if(wifiSetup)listener();
+    digitalWrite(servo1Pow, HIGH);
+
+    currentMills = millis();
+    if(currentMills - previousMills >= interval){
+      previousMills = currentMills;
+      digitalWrite(rightSW, LOW);
+      pinMode(rightSW, OUTPUT);
+      delay(100);
+      digitalWrite(rightSW,HIGH);
+      pinMode(rightSW, INPUT_PULLUP);
     }
 
     if (digitalRead(leftSW) == LOW) {
@@ -174,7 +240,7 @@ void setServoParam(bool wifiSetup) {
     myservo.write(pos);
 
     if (digitalRead(bootSW) == LOW) {
-      digitalWrite(servoPow, LOW);
+      digitalWrite(servo1Pow, LOW);
       break;
     }
   }
@@ -191,39 +257,11 @@ void setServoParam(bool wifiSetup) {
     }
     ini.rwIni("KabeCon", "minimum1", &strMinimum, WRITE);
     ini.rwIni("KabeCon", "maximum1", &strMaximum, WRITE);
+    bottomSwitch.setPositions(minimum, maximum, (minimum + maximum) / 2);
   }
   
 }
 
-void swOn() {
-  isOn = true;
-  pos = maximum;
-  digitalWrite(servoPow, HIGH); //サーボを動かすときは電源を入れます
-  myservo.write(pos);
-  delay(1000);
-  myservo.write(100);
-  delay(500);
-  digitalWrite(servoPow, LOW);  //動かし終わったら電源を切ります
-}
-
-void swOff() {
-  isOn = false;
-  pos = minimum;
-  digitalWrite(servoPow, HIGH);
-  myservo.write(pos);
-  delay(1000);
-  myservo.write(100);
-  delay(500);
-  digitalWrite(servoPow, LOW);
-}
-
-void swTurn(){
-  if(isOn){
-    swOff();
-  }else{
-    swOn();
-  }
-}
 
 
 //- ini File Access Sample ------------------------------------------------------------------------
